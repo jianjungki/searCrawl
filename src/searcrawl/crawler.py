@@ -109,14 +109,11 @@ class WebCrawler:
         # Extract plain text using BeautifulSoup
         soup = BeautifulSoup(html, "html.parser")
 
-        text = soup.get_text(separator="
-")  # Preserve paragraph line breaks
+        text = soup.get_text(separator="\n")  # Preserve paragraph line breaks
 
         # Clean up extra blank lines
-        cleaned_text = "
-".join([
-            line.strip() for line in text.split("
-") if line.strip()
+        cleaned_text = "\n".join([
+            line.strip() for line in text.split("\n") if line.strip()
         ])
 
         return cleaned_text
@@ -167,8 +164,7 @@ class WebCrawler:
 
             dataList.append(encode('--'+boundary+'--'))
             dataList.append(encode(''))
-            body = b'
-'.join(dataList)
+            body = b'\n'.join(dataList)
 
             headers = {
                 'Cookie': f'disabled_engines={disabled_engines};enabled_engines={enabled_engines};method=POST',

@@ -109,11 +109,14 @@ class WebCrawler:
         # Extract plain text using BeautifulSoup
         soup = BeautifulSoup(html, "html.parser")
 
-        text = soup.get_text(separator="\n")  # Preserve paragraph line breaks
+        text = soup.get_text(separator="
+")  # Preserve paragraph line breaks
 
         # Clean up extra blank lines
-        cleaned_text = "\n".join([
-            line.strip() for line in text.split("\n") if line.strip()
+        cleaned_text = "
+".join([
+            line.strip() for line in text.split("
+") if line.strip()
         ])
 
         return cleaned_text
@@ -164,7 +167,8 @@ class WebCrawler:
 
             dataList.append(encode('--'+boundary+'--'))
             dataList.append(encode(''))
-            body = b'\r\n'.join(dataList)
+            body = b'
+'.join(dataList)
 
             headers = {
                 'Cookie': f'disabled_engines={disabled_engines};enabled_engines={enabled_engines};method=POST',
@@ -252,8 +256,10 @@ class WebCrawler:
                             continue
 
                         # Add successful result's markdown content to the list
-                        result_with_source = result.markdown.fit_markdown + '\n\n'
-                        all_results.append(result_with_source)
+                        all_results.append({
+                            "content": result.markdown.fit_markdown,
+                            "reference": urls[i]
+                        })
                         logger.info(f"Successfully crawled URL: {urls[i]}")
                     else:
                         logger.debug(f"URL crawl failed: {urls[i]}")
@@ -288,8 +294,10 @@ class WebCrawler:
                                 continue
 
                             # Add successful retry result to the list
-                            result_with_source = result.markdown.fit_markdown + '\n\n'
-                            all_results.append(result_with_source)
+                            all_results.append({
+                                "content": result.markdown.fit_markdown,
+                                "reference": retry_urls[i]
+                            })
                             logger.info(f"Successfully crawled URL on retry: {retry_urls[i]}")
                         else:
                             logger.debug(f"Retry URL crawl still failed: {retry_urls[i]}")
@@ -304,19 +312,22 @@ class WebCrawler:
                 logger.error("All URL crawls failed")
                 raise HTTPException(status_code=500, detail="All URL crawls failed")
 
-            # Join all successful results into a complete string with separators
-            combined_content = '\n\n==========\n\n'.join(all_results)
-
-            # Convert to plain text
-            plain_text = self.markdown_to_text_regex(self.markdown_to_text(combined_content))
+            # Process each result to convert markdown to plain text
+            processed_results = []
+            for result in all_results:
+                plain_text = self.markdown_to_text_regex(self.markdown_to_text(result["content"]))
+                processed_results.append({
+                    "content": plain_text,
+                    "reference": result["reference"]
+                })
 
             response = {
-                "content": plain_text,
-                "success_count": len(all_results),
+                "results": processed_results,
+                "success_count": len(processed_results),
                 "failed_urls": failed_urls
             }
 
-            logger.info(f"Crawl completed, successful: {len(all_results)}, failed: {len(failed_urls)}")
+            logger.info(f"Crawl completed, successful: {len(processed_results)}, failed: {len(failed_urls)}")
             return response
         except Exception as e:
             logger.error(f"Exception occurred during crawling: {str(e)}")

@@ -25,7 +25,7 @@ from fastapi import HTTPException
 from loguru import logger
 
 # Import configuration
-from searcrawl.config import (
+from .config import (
     SEARXNG_HOST,
     SEARXNG_PORT,
     SEARXNG_BASE_PATH,
@@ -34,36 +34,151 @@ from searcrawl.config import (
     SEARCH_LANGUAGE,
     CONTENT_FILTER_THRESHOLD,
     WORD_COUNT_THRESHOLD,
-    CACHE_ENABLED,
-    REDIS_URL,
-    CACHE_TTL_HOURS
+    ANTI_CRAWL_ENABLED,
+    ENABLE_PROXY_ROTATION,
+    ENABLE_USER_AGENT_ROTATION,
+    ENABLE_REQUEST_DELAY,
+    ENABLE_RANDOM_HEADERS,
+    ENABLE_BROWSER_HEADERS,
+    MIN_REQUEST_DELAY,
+    MAX_REQUEST_DELAY,
+    PROXY_ROTATION_MODE,
+    USE_MOBILE_AGENTS,
+    PROXY_LIST,
+    CUSTOM_USER_AGENTS
 )
-from searcrawl.cache import CacheManager
+from .cache import CacheManager
+from .anti_crawl import (
+    AntiCrawlConfig,
+    ProxyConfig,
+    ProxyType
+)
 
 
 class WebCrawler:
     """Web crawler class that encapsulates web crawling and content processing functionality"""
 
-    def __init__(self, cache_manager: Optional[CacheManager] = None):
+    def __init__(self, cache_manager: Optional[CacheManager] = None, anti_crawl_config: Optional[AntiCrawlConfig] = None):
         """Initialize crawler instance
         
         Args:
             cache_manager: Optional cache manager instance for caching crawl results
+            anti_crawl_config: Optional anti-crawl configuration for evasion techniques
         """
         self.crawler: Optional[AsyncWebCrawler] = None
         self.cache_manager = cache_manager
+        self.anti_crawl_config = anti_crawl_config or self._create_default_anti_crawl_config()
         logger.info("Initializing WebCrawler instance")
+        logger.info(f"Anti-crawl configuration: {self.anti_crawl_config.to_dict()}")
+
+    def _create_default_anti_crawl_config(self) -> AntiCrawlConfig:
+        """Create default anti-crawl configuration from environment variables"""
+        if not ANTI_CRAWL_ENABLED:
+            logger.info("Anti-crawl features disabled")
+            return AntiCrawlConfig(
+                enable_proxy_rotation=False,
+                enable_user_agent_rotation=False,
+                enable_request_delay=False,
+                enable_random_headers=False,
+                enable_browser_headers=False
+            )
+        
+        # Parse proxy list
+        proxies = []
+        if PROXY_LIST:
+            for proxy_str in PROXY_LIST.split(","):
+                proxy_str = proxy_str.strip()
+                if not proxy_str:
+                    continue
+                
+                try:
+                    # Parse proxy URL format: http://user:pass@host:port or http://host:port
+                    if "@" in proxy_str:
+                        # Has authentication
+                        parts = proxy_str.split("://")
+                        if len(parts) == 2:
+                            protocol = parts[0]
+                            auth_and_host = parts[1].split("@")
+                            if len(auth_and_host) == 2:
+                                auth = auth_and_host[0].split(":")
+                                host = auth_and_host[1]
+                                if len(auth) == 2:
+                                    proxies.append(ProxyConfig(
+                                        url=host,
+                                        proxy_type=ProxyType(protocol),
+                                        username=auth[0],
+                                        password=auth[1]
+                                    ))
+                    else:
+                        # No authentication
+                        parts = proxy_str.split("://")
+                        if len(parts) == 2:
+                            protocol = parts[0]
+                            host = parts[1]
+                            proxies.append(ProxyConfig(
+                                url=host,
+                                proxy_type=ProxyType(protocol)
+                            ))
+                except Exception as e:
+                    logger.warning(f"Failed to parse proxy: {proxy_str}, error: {e}")
+        
+        # Parse custom user agents
+        custom_agents = []
+        if CUSTOM_USER_AGENTS:
+            custom_agents = [ua.strip() for ua in CUSTOM_USER_AGENTS.split(",") if ua.strip()]
+        
+        return AntiCrawlConfig(
+            enable_proxy_rotation=ENABLE_PROXY_ROTATION,
+            enable_user_agent_rotation=ENABLE_USER_AGENT_ROTATION,
+            enable_request_delay=ENABLE_REQUEST_DELAY,
+            enable_random_headers=ENABLE_RANDOM_HEADERS,
+            enable_browser_headers=ENABLE_BROWSER_HEADERS,
+            min_delay=MIN_REQUEST_DELAY,
+            max_delay=MAX_REQUEST_DELAY,
+            proxy_rotation_mode=PROXY_ROTATION_MODE,
+            custom_user_agents=custom_agents,
+            use_mobile_agents=USE_MOBILE_AGENTS,
+            proxies=proxies
+        )
 
     async def initialize(self) -> None:
         """Initialize AsyncWebCrawler instance
 
         Must be called before using the crawler
         """
-        # Configure browser
-        browser_config = BrowserConfig(headless=True, verbose=False)
+        # Build browser config with anti-crawl settings
+        if ANTI_CRAWL_ENABLED:
+            # Get anti-crawl headers
+            headers = self.anti_crawl_config.get_headers()
+            
+            # Get proxy if enabled
+            proxy = self.anti_crawl_config.get_proxy()
+            
+            # Add browser arguments to hide automation
+            extra_args = [
+                "--disable-blink-features=AutomationControlled",  # Hide automation
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process",
+            ]
+            
+            # Configure browser with anti-crawl settings
+            browser_config = BrowserConfig(
+                headless=True,
+                verbose=False,
+                extra_args=extra_args,
+                headers=headers if headers else {},
+                proxy=proxy if proxy else ""
+            )
+        else:
+            # Configure browser without anti-crawl settings
+            browser_config = BrowserConfig(headless=True, verbose=False)
+        
         # Initialize crawler
         self.crawler = await AsyncWebCrawler(config=browser_config).__aenter__()
-        logger.info("AsyncWebCrawler initialization completed")
+        logger.info("AsyncWebCrawler initialization completed with anti-crawl features")
 
     async def close(self) -> None:
         """Close crawler instance and release resources"""
@@ -255,6 +370,10 @@ class WebCrawler:
             )
 
             logger.info(f"Starting to crawl URLs: {', '.join(urls_to_crawl)}")
+            
+            # Apply anti-crawl delay before crawling
+            if ANTI_CRAWL_ENABLED and self.anti_crawl_config.enable_request_delay:
+                self.anti_crawl_config.apply_delay()
             
             # Ensure crawler is initialized
             if not self.crawler:

@@ -46,6 +46,25 @@ DISABLED_ENGINES = os.getenv(
 ENABLED_ENGINES = os.getenv("ENABLED_ENGINES", "baidu__general")
 SEARCH_LANGUAGE = os.getenv("SEARCH_LANGUAGE", "auto")
 
+# Anti-Crawl Configuration
+ANTI_CRAWL_ENABLED = os.getenv("ANTI_CRAWL_ENABLED", "true").lower() == "true"
+ENABLE_PROXY_ROTATION = os.getenv("ENABLE_PROXY_ROTATION", "false").lower() == "true"
+ENABLE_USER_AGENT_ROTATION = os.getenv("ENABLE_USER_AGENT_ROTATION", "true").lower() == "true"
+ENABLE_REQUEST_DELAY = os.getenv("ENABLE_REQUEST_DELAY", "true").lower() == "true"
+ENABLE_RANDOM_HEADERS = os.getenv("ENABLE_RANDOM_HEADERS", "true").lower() == "true"
+ENABLE_BROWSER_HEADERS = os.getenv("ENABLE_BROWSER_HEADERS", "true").lower() == "true"
+MIN_REQUEST_DELAY = float(os.getenv("MIN_REQUEST_DELAY", "0.5"))
+MAX_REQUEST_DELAY = float(os.getenv("MAX_REQUEST_DELAY", "3.0"))
+PROXY_ROTATION_MODE = os.getenv("PROXY_ROTATION_MODE", "random")  # "random" or "sequential"
+USE_MOBILE_AGENTS = os.getenv("USE_MOBILE_AGENTS", "false").lower() == "true"
+
+# Proxy Configuration (comma-separated list of proxy URLs)
+# Format: http://proxy1:port,http://proxy2:port or http://user:pass@proxy:port
+PROXY_LIST = os.getenv("PROXY_LIST", "").strip()
+
+# Custom User-Agents (comma-separated list)
+CUSTOM_USER_AGENTS = os.getenv("CUSTOM_USER_AGENTS", "").strip()
+
 
 def get_config_info() -> Dict[str, Any]:
     """Returns a dictionary of current configuration information
@@ -72,5 +91,19 @@ def get_config_info() -> Dict[str, Any]:
         "search_engines": {
             "disabled": DISABLED_ENGINES,
             "enabled": ENABLED_ENGINES
+        },
+        "anti_crawl": {
+            "enabled": ANTI_CRAWL_ENABLED,
+            "enable_proxy_rotation": ENABLE_PROXY_ROTATION,
+            "enable_user_agent_rotation": ENABLE_USER_AGENT_ROTATION,
+            "enable_request_delay": ENABLE_REQUEST_DELAY,
+            "enable_random_headers": ENABLE_RANDOM_HEADERS,
+            "enable_browser_headers": ENABLE_BROWSER_HEADERS,
+            "min_request_delay": MIN_REQUEST_DELAY,
+            "max_request_delay": MAX_REQUEST_DELAY,
+            "proxy_rotation_mode": PROXY_ROTATION_MODE,
+            "use_mobile_agents": USE_MOBILE_AGENTS,
+            "proxy_count": len(PROXY_LIST.split(",")) if PROXY_LIST else 0,
+            "custom_user_agents_count": len(CUSTOM_USER_AGENTS.split(",")) if CUSTOM_USER_AGENTS else 0
         }
     }

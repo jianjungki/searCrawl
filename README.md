@@ -119,8 +119,11 @@ cd SearXNG-Crawl4AI
 cp .env.example .env
 # Edit .env file as needed
 
-# 3. Start all services (app + Redis)
+# 3. Start basic services (app + Redis)
 docker-compose up -d
+
+# Or start with SearXNG included
+docker-compose --profile searxng up -d
 
 # 4. View logs
 docker-compose logs -f
@@ -129,7 +132,35 @@ docker-compose logs -f
 docker-compose down
 ```
 
-The service will be available at `http://localhost:3000`
+#### 📦 Docker Compose Profiles
+
+This project supports selective service startup using profiles:
+
+| Profile | Services Included | Use Case |
+|---------|------------------|----------|
+| **Default (no profile)** | App + Redis | Development with external SearXNG |
+| **searxng** | App + Redis + SearXNG | Complete local environment |
+| **full** | All services | Production or full testing |
+
+**Startup Examples:**
+
+```bash
+# Start basic services only (App + Redis)
+docker-compose up -d
+
+# Start with SearXNG included
+docker-compose --profile searxng up -d
+
+# Start all services
+docker-compose --profile full up -d
+```
+
+**Service Access URLs:**
+- **Main API**: `http://localhost:8000`
+- **SearXNG Interface**: `http://localhost:8080` (when using searxng profile)
+- **Redis**: `localhost:6379`
+
+For detailed Docker Profiles usage, see: [`DOCKER_PROFILES.md`](DOCKER_PROFILES.md)
 
 ### 💻 Manual Installation
 

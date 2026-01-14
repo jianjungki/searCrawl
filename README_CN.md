@@ -119,8 +119,11 @@ cd SearXNG-Crawl4AI
 cp .env.example .env
 # 根据需要编辑 .env 文件
 
-# 3. 启动所有服务（应用 + Redis）
+# 3. 启动基础服务（应用 + Redis）
 docker-compose up -d
+
+# 或启动包含 SearXNG 的完整服务
+docker-compose --profile searxng up -d
 
 # 4. 查看日志
 docker-compose logs -f
@@ -129,7 +132,35 @@ docker-compose logs -f
 docker-compose down
 ```
 
-服务将在 `http://localhost:3000` 上运行
+#### 📦 Docker Compose Profiles
+
+本项目支持通过 profiles 选择性启动服务：
+
+| Profile | 包含服务 | 使用场景 |
+|---------|---------|---------|
+| **默认（无 profile）** | App + Redis | 开发环境，使用外部 SearXNG |
+| **searxng** | App + Redis + SearXNG | 完整本地环境 |
+| **full** | 所有服务 | 生产环境或完整测试 |
+
+**启动示例：**
+
+```bash
+# 仅启动基础服务（App + Redis）
+docker-compose up -d
+
+# 启动包含 SearXNG 的服务
+docker-compose --profile searxng up -d
+
+# 启动所有服务
+docker-compose --profile full up -d
+```
+
+**服务访问地址：**
+- **主应用 API**: `http://localhost:8000`
+- **SearXNG 界面**: `http://localhost:8080` (使用 searxng profile 时)
+- **Redis**: `localhost:6379`
+
+详细的 Docker Profiles 使用说明请参考：[`DOCKER_PROFILES.md`](DOCKER_PROFILES.md)
 
 ### 💻 手动安装
 
@@ -173,10 +204,10 @@ cp .env.example .env
 
 ```bash
 # 使用命令行工具
-searcrawl
+opencrawl
 
 # 或直接使用 Python
-python -m searcrawl.main
+python -m opencrawl.main
 ```
 
 服务默认运行在 `http://0.0.0.0:3000`

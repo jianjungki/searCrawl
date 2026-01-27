@@ -9,12 +9,12 @@
 
 ## 📖 Introduction
 
-**tavily-open** is a powerful open-source search and web crawling tool built on SearXNG and Crawl4AI. It provides search and web content extraction capabilities similar to Tavily, while being fully open-source, customizable, and supporting distributed caching.
+**tavily-open** is a powerful open-source search and web crawling tool built on SearXNG. It provides flexible web content extraction capabilities through two main methods: the robust `Crawl4AI` library for deep crawling and an optional integration with `Jina Reader` for fast, AI-powered content fetching. This dual-engine approach allows users to choose between comprehensive crawling and high-speed content extraction. The tool is fully open-source, customizable, and supports distributed caching.
 
 ### ✨ Key Features
 
 - 🔎 **Intelligent Search** - High-quality search results through SearXNG meta search engine
-- 🕷️ **Smart Crawling** - Efficient web content extraction using Crawl4AI
+- 🕷️ **Dual Crawling Engines** - Choose between `Crawl4AI` for deep, JavaScript-rendered crawling and `Jina Reader` for fast, AI-optimized content extraction.
 - 🚀 **Distributed Caching** - Redis-based distributed caching to reduce redundant crawling and improve performance
 - 🎯 **RESTful API** - Clean and easy-to-use API interface with Swagger documentation
 - ⚙️ **Highly Customizable** - Flexible configuration for search engines, crawler parameters, and caching strategies
@@ -54,14 +54,21 @@
          │  Cache Query     │
          └────────┬─────────┘
                   │
-                  │ URLs to Crawl
+                  │ URLs to Process
                   │
-         ┌────────▼─────────┐
-         │  Crawl4AI Pool   │
-         │  (Multi-thread)  │
-         └────────┬─────────┘
-                  │
-                  │ Extract Content
+      ┌───────────▼───────────┐
+      │  Extraction Engine    │
+      │ (Select via .env)     │
+      └───────────┬───────────┘
+      ┌───────────┴───────────┐
+      │                       │
+┌─────▼─────┐           ┌─────▼─────┐
+│ Jina Reader │           │ Crawl4AI  │
+│  (Profile:  │           │  (Default)  │
+│   reader)   │           │           │
+└─────┬─────┘           └─────┬─────┘
+      │                       │
+      └───────────┬───────────┘
                   │
          ┌────────▼─────────┐
          │ Content Filter   │
@@ -78,14 +85,16 @@
 
 ### 🔄 Workflow Explanation
 
-1. **Receive Request** - Client sends search query with parameters (keywords, result count, search engine config)
-2. **Cache Check** - System first checks Redis cache for previously crawled content (if caching enabled)
-3. **Search Phase** - Query is sent to SearXNG to retrieve relevant URL list and metadata
-4. **URL Deduplication** - Deduplicate search results and check cache hit status
-5. **Parallel Crawling** - Use Crawl4AI thread pool to concurrently crawl uncached URLs
-6. **Content Processing** - Extract, clean, and format web content, filter low-quality content
-7. **Cache Storage** - Store successfully crawled content to Redis with expiration time
-8. **Return Results** - Return processed content with statistics (cache hits, newly crawled, failures)
+1. **Receive Request** - Client sends search query with parameters (keywords, result count, search engine config).
+2. **Cache Check** - System first checks Redis cache for previously crawled content (if caching is enabled).
+3. **Search Phase** - The query is sent to SearXNG to retrieve a relevant URL list and metadata.
+4. **URL Deduplication** - Search results are deduplicated, and their cache hit status is checked.
+5. **Content Extraction** - For uncached URLs, the system uses one of two configured engines. The choice is determined by the `READER_ENABLED` setting in the `.env` file and the active Docker Compose profile.
+    - **Crawl4AI (Default)**: Provides deep crawling with JavaScript rendering. This is the default method.
+    - **Jina Reader (Optional)**: When `READER_ENABLED=true` is set and the `reader` profile is active, the system uses the Jina Reader service for fast, AI-powered content extraction.
+6. **Content Processing** - The extracted raw content is cleaned, formatted, and filtered for quality.
+7. **Cache Storage** - Successfully fetched content is stored in Redis with an expiration time.
+8. **Return Results** - The final processed content is returned along with statistics (cache hits, newly crawled, failures).
 
 ### 🧩 Core Components
 
@@ -93,7 +102,7 @@
 |-----------|-------------|------------|
 | **API Server** | RESTful API interface | FastAPI + Uvicorn |
 | **Search Engine** | Privacy-friendly meta search | SearXNG |
-| **Crawler Engine** | Intelligent content extraction | Crawl4AI + Playwright |
+| **Crawler Engine** | Intelligent content extraction | Crawl4AI + Playwright / Jina Reader |
 | **Cache Layer** | Distributed cache storage | Redis |
 | **Concurrent Processing** | Multi-threaded crawling | ThreadPoolExecutor |
 
@@ -140,6 +149,7 @@ This project supports selective service startup using profiles:
 |---------|------------------|----------|
 | **Default (no profile)** | App + Redis | Development with external SearXNG |
 | **searxng** | App + Redis + SearXNG | Complete local environment |
+| **reader** | App + Redis + Reader | Use Reader service for content extraction |
 | **full** | All services | Production or full testing |
 
 **Startup Examples:**
@@ -151,6 +161,9 @@ docker-compose up -d
 # Start with SearXNG included
 docker-compose --profile searxng up -d
 
+# Start with Reader service included
+docker-compose --profile reader up -d
+
 # Start all services
 docker-compose --profile full up -d
 ```
@@ -158,6 +171,7 @@ docker-compose --profile full up -d
 **Service Access URLs:**
 - **Main API**: `http://localhost:8000`
 - **SearXNG Interface**: `http://localhost:8080` (when using searxng profile)
+- **Reader Service**: `http://localhost:3001` (when using reader profile)
 - **Redis**: `localhost:6379`
 
 For detailed Docker Profiles usage, see: [`DOCKER_PROFILES.md`](DOCKER_PROFILES.md)
@@ -298,6 +312,11 @@ SEARXNG_BASE_PATH=/search
 # ========== API Service Configuration ==========
 API_HOST=0.0.0.0
 API_PORT=3000
+
+# ========== Reader Service Configuration ==========
+READER_ENABLED=false
+READER_URL=http://localhost:3001
+READER_API_KEY=
 
 # ========== Crawler Configuration ==========
 DEFAULT_SEARCH_LIMIT=10          # Default search result count
@@ -469,6 +488,7 @@ This project is built on the following excellent open-source projects:
 - **[SearCrawl](https://github.com/Owoui/SearXNG-Crawl4AI)** - The predecessor of this project, thanks for the original contributions
 - **[SearXNG](https://github.com/searxng/searxng)** - Privacy-respecting meta search engine
 - **[Crawl4AI](https://github.com/unclecode/crawl4ai)** - Web crawling library designed for AI
+- **[Jina Reader](https://github.com/jina-ai/reader)** - A fast and intelligent web reader service
 - **[FastAPI](https://fastapi.tiangolo.com/)** - Modern, fast web framework
 - **[Redis](https://redis.io/)** - High-performance in-memory data store
 

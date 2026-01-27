@@ -25,6 +25,11 @@ SEARXNG_API_BASE = f"http://{SEARXNG_HOST}:{SEARXNG_PORT}{SEARXNG_BASE_PATH}"
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "3000"))
 
+# Reader Service Configuration
+READER_ENABLED = os.getenv("READER_ENABLED", "false").lower() == "true"
+READER_URL = os.getenv("READER_URL", "http://reader:3000")
+READER_API_KEY = os.getenv("READER_API_KEY", "")
+
 # Crawler Configuration
 DEFAULT_SEARCH_LIMIT = int(os.getenv("DEFAULT_SEARCH_LIMIT", "10"))
 CONTENT_FILTER_THRESHOLD = float(os.getenv("CONTENT_FILTER_THRESHOLD", "0.6"))
@@ -82,6 +87,10 @@ def get_config_info() -> Dict[str, Any]:
         "api": {
             "host": API_HOST,
             "port": API_PORT
+        },
+        "reader": {
+            "enabled": READER_ENABLED,
+            "url": READER_URL
         },
         "crawler": {
             "default_search_limit": DEFAULT_SEARCH_LIMIT,

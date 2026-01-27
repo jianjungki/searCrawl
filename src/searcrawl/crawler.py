@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 import re
 import httpx
 import json
+import asyncio
 from fastapi import HTTPException
 from loguru import logger
 
@@ -45,8 +46,10 @@ from .config import (
     PROXY_ROTATION_MODE,
     USE_MOBILE_AGENTS,
     PROXY_LIST,
-    CUSTOM_USER_AGENTS
+    CUSTOM_USER_AGENTS,
+    READER_ENABLED,
 )
+from .reader import fetch_with_reader
 from .cache import CacheManager
 from .anti_crawl import (
     AntiCrawlConfig,
@@ -316,7 +319,7 @@ class WebCrawler:
 
             # Check cache first if cache manager is available
             cached_results = []
-            urls_to_crawl = []
+            urls_to_process = []
             
             if self.cache_manager and self.cache_manager.is_available():
                 logger.info(f"Checking cache for {len(urls)} URLs")
@@ -331,15 +334,15 @@ class WebCrawler:
                         })
                         logger.info(f"Cache hit for URL: {url}")
                     else:
-                        urls_to_crawl.append(url)
+                        urls_to_process.append(url)
                 
-                logger.info(f"Cache hits: {len(cached_results)}, URLs to crawl: {len(urls_to_crawl)}")
+                logger.info(f"Cache hits: {len(cached_results)}, URLs to process: {len(urls_to_process)}")
             else:
-                urls_to_crawl = urls
-                logger.info("Cache not available, crawling all URLs")
+                urls_to_process = urls
+                logger.info("Cache not available, processing all URLs")
 
             # If all URLs are cached, return cached results
-            if not urls_to_crawl:
+            if not urls_to_process:
                 logger.info("All URLs found in cache, returning cached results")
                 return {
                     "results": cached_results,
@@ -348,134 +351,159 @@ class WebCrawler:
                     "cache_hits": len(cached_results)
                 }
 
-            # Configure Markdown generator
-            md_generator = DefaultMarkdownGenerator(
-                content_filter=PruningContentFilter(threshold=CONTENT_FILTER_THRESHOLD),
-                options={
-                    "ignore_links": True,
-                    "ignore_images": True,
-                    "escape_html": False,
-                }
-            )
-
-            # Configure crawler run parameters
-            run_config = CrawlerRunConfig(
-                word_count_threshold=WORD_COUNT_THRESHOLD,
-                exclude_external_links=True,
-                remove_overlay_elements=True,
-                excluded_tags=['img', 'header', 'footer', 'iframe', 'nav'],
-                process_iframes=True,
-                markdown_generator=md_generator,
-                cache_mode=CacheMode.BYPASS
-            )
-
-            logger.info(f"Starting to crawl URLs: {', '.join(urls_to_crawl)}")
-            
-            # Apply anti-crawl delay before crawling
-            if ANTI_CRAWL_ENABLED and self.anti_crawl_config.enable_request_delay:
-                self.anti_crawl_config.apply_delay()
-            
-            # Ensure crawler is initialized
-            if not self.crawler:
-                raise RuntimeError("Crawler not initialized")
-            
-            # Crawl URLs and get results
-            crawl_result = await self.crawler.arun_many(urls=urls_to_crawl, config=run_config)
-            
-            # Convert to list if it's an async generator
-            results: list = []
-            if hasattr(crawl_result, '__aiter__'):
-                async for result in crawl_result:  # type: ignore
-                    results.append(result)
-            else:
-                results = list(crawl_result) if crawl_result else []  # type: ignore
-
-            # Create a list to store crawl results from all successful URLs
             all_results = []
             failed_urls = []
-            retry_urls = []
 
-            # First crawl attempt processing
-            for i, result in enumerate(results):
-                try:
-                    if result is None:
-                        logger.debug(f"URL crawl result is None: {urls_to_crawl[i]}")
-                        retry_urls.append(urls_to_crawl[i])
-                        continue
+            all_results = []
+            failed_urls = []
 
-                    if not hasattr(result, 'success'):
-                        logger.debug(f"URL crawl result missing success attribute: {urls_to_crawl[i]}")
-                        retry_urls.append(urls_to_crawl[i])
-                        continue
+            if READER_ENABLED:
+                # --- Jina Reader Path ---
+                logger.info(f"Using Jina Reader service for {len(urls_to_process)} URLs")
+                tasks = [fetch_with_reader(url) for url in urls_to_process]
+                reader_results = await asyncio.gather(*tasks)
+                
+                for result in reader_results:
+                    if result:
+                        all_results.append(result)
+                    # In a strict either/or setup, we don't fallback, so we just log failures.
+                    # The failed URLs will be collected at the end.
 
-                    if result.success:
-                        if not hasattr(result, 'markdown') or not hasattr(result.markdown, 'fit_markdown'):
-                            logger.debug(f"URL crawl result missing markdown content: {urls_to_crawl[i]}")
+            else:
+                # --- Crawl4AI Path ---
+                urls_to_crawl = urls_to_process
+                logger.info(f"Using Crawl4AI for {len(urls_to_crawl)} URLs")
+                
+                # Configure Markdown generator
+                md_generator = DefaultMarkdownGenerator(
+                    content_filter=PruningContentFilter(threshold=CONTENT_FILTER_THRESHOLD),
+                    options={
+                        "ignore_links": True,
+                        "ignore_images": True,
+                        "escape_html": False,
+                    }
+                )
+
+                # Configure crawler run parameters
+                run_config = CrawlerRunConfig(
+                    word_count_threshold=WORD_COUNT_THRESHOLD,
+                    exclude_external_links=True,
+                    remove_overlay_elements=True,
+                    excluded_tags=['img', 'header', 'footer', 'iframe', 'nav'],
+                    process_iframes=True,
+                    markdown_generator=md_generator,
+                    cache_mode=CacheMode.BYPASS
+                )
+
+                logger.info(f"Starting to crawl URLs: {', '.join(urls_to_crawl)}")
+                
+                # Apply anti-crawl delay before crawling
+                if ANTI_CRAWL_ENABLED and self.anti_crawl_config.enable_request_delay:
+                    self.anti_crawl_config.apply_delay()
+                
+                # Ensure crawler is initialized
+                if not self.crawler:
+                    raise RuntimeError("Crawler not initialized")
+                
+                # Crawl URLs and get results
+                crawl_result = await self.crawler.arun_many(urls=urls_to_crawl, config=run_config)
+                
+                # Convert to list if it's an async generator
+                results: list = []
+                if hasattr(crawl_result, '__aiter__'):
+                    async for result in crawl_result:  # type: ignore
+                        results.append(result)
+                else:
+                    results = list(crawl_result) if crawl_result else []  # type: ignore
+
+                # Create a list to store crawl results from all successful URLs
+                retry_urls = []
+
+                # First crawl attempt processing
+                for i, result in enumerate(results):
+                    try:
+                        if result is None:
+                            logger.debug(f"URL crawl result is None: {urls_to_crawl[i]}")
                             retry_urls.append(urls_to_crawl[i])
                             continue
 
-                        # Add successful result's markdown content to the list
-                        all_results.append({
-                            "content": result.markdown.fit_markdown,
-                            "reference": urls_to_crawl[i]
-                        })
-                        logger.info(f"Successfully crawled URL: {urls_to_crawl[i]}")
-                    else:
-                        logger.debug(f"URL crawl failed: {urls_to_crawl[i]}")
-                        retry_urls.append(urls_to_crawl[i])
-                except Exception as e:
-                    # Record URLs that need retry
-                    retry_urls.append(urls_to_crawl[i])
-                    error_msg = str(e)
-                    logger.warning(f"URL first crawl attempt failed: {urls_to_crawl[i]}, error: {error_msg}")
-
-            # If there are URLs to retry, perform second crawl attempt
-            if retry_urls:
-                logger.info(f"Retrying failed URLs: {', '.join(retry_urls)}")
-                
-                # Crawl retry URLs and get results
-                retry_crawl_result = await self.crawler.arun_many(urls=retry_urls, config=run_config)
-                
-                # Convert to list if it's an async generator
-                retry_results: list = []
-                if hasattr(retry_crawl_result, '__aiter__'):
-                    async for result in retry_crawl_result:  # type: ignore
-                        retry_results.append(result)
-                else:
-                    retry_results = list(retry_crawl_result) if retry_crawl_result else []  # type: ignore
-
-                for i, result in enumerate(retry_results):
-                    try:
-                        if result is None:
-                            logger.debug(f"Retry URL crawl result is None: {retry_urls[i]}")
-                            failed_urls.append(retry_urls[i])
-                            continue
-
                         if not hasattr(result, 'success'):
-                            logger.debug(f"Retry URL crawl result missing success attribute: {retry_urls[i]}")
-                            failed_urls.append(retry_urls[i])
+                            logger.debug(f"URL crawl result missing success attribute: {urls_to_crawl[i]}")
+                            retry_urls.append(urls_to_crawl[i])
                             continue
 
                         if result.success:
                             if not hasattr(result, 'markdown') or not hasattr(result.markdown, 'fit_markdown'):
-                                logger.debug(f"Retry URL crawl result missing markdown content: {retry_urls[i]}")
+                                logger.debug(f"URL crawl result missing markdown content: {urls_to_crawl[i]}")
+                                retry_urls.append(urls_to_crawl[i])
+                                continue
+
+                            # Add successful result's markdown content to the list
+                            all_results.append({
+                                "content": result.markdown.fit_markdown,
+                                "reference": urls_to_crawl[i]
+                            })
+                            logger.info(f"Successfully crawled URL: {urls_to_crawl[i]}")
+                        else:
+                            logger.debug(f"URL crawl failed: {urls_to_crawl[i]}")
+                            retry_urls.append(urls_to_crawl[i])
+                    except Exception as e:
+                        # Record URLs that need retry
+                        retry_urls.append(urls_to_crawl[i])
+                        error_msg = str(e)
+                        logger.warning(f"URL first crawl attempt failed: {urls_to_crawl[i]}, error: {error_msg}")
+
+                # If there are URLs to retry, perform second crawl attempt
+                if retry_urls:
+                    logger.info(f"Retrying failed URLs: {', '.join(retry_urls)}")
+                    
+                    # Crawl retry URLs and get results
+                    retry_crawl_result = await self.crawler.arun_many(urls=retry_urls, config=run_config)
+                    
+                    # Convert to list if it's an async generator
+                    retry_results: list = []
+                    if hasattr(retry_crawl_result, '__aiter__'):
+                        async for result in retry_crawl_result:  # type: ignore
+                            retry_results.append(result)
+                    else:
+                        retry_results = list(retry_crawl_result) if retry_crawl_result else []  # type: ignore
+
+                    for i, result in enumerate(retry_results):
+                        try:
+                            if result is None:
+                                logger.debug(f"Retry URL crawl result is None: {retry_urls[i]}")
                                 failed_urls.append(retry_urls[i])
                                 continue
 
-                            # Add successful retry result to the list
-                            all_results.append({
-                                "content": result.markdown.fit_markdown,
-                                "reference": retry_urls[i]
-                            })
-                            logger.info(f"Successfully crawled URL on retry: {retry_urls[i]}")
-                        else:
-                            logger.debug(f"Retry URL crawl still failed: {retry_urls[i]}")
+                            if not hasattr(result, 'success'):
+                                logger.debug(f"Retry URL crawl result missing success attribute: {retry_urls[i]}")
+                                failed_urls.append(retry_urls[i])
+                                continue
+
+                            if result.success:
+                                if not hasattr(result, 'markdown') or not hasattr(result.markdown, 'fit_markdown'):
+                                    logger.debug(f"Retry URL crawl result missing markdown content: {retry_urls[i]}")
+                                    failed_urls.append(retry_urls[i])
+                                    continue
+
+                                # Add successful retry result to the list
+                                all_results.append({
+                                    "content": result.markdown.fit_markdown,
+                                    "reference": retry_urls[i]
+                                })
+                                logger.info(f"Successfully crawled URL on retry: {retry_urls[i]}")
+                            else:
+                                logger.debug(f"Retry URL crawl still failed: {retry_urls[i]}")
+                                failed_urls.append(retry_urls[i])
+                        except Exception as e:
+                            # Record finally failed URLs
                             failed_urls.append(retry_urls[i])
-                    except Exception as e:
-                        # Record finally failed URLs
-                        failed_urls.append(retry_urls[i])
-                        error_msg = str(e)
-                        logger.error(f"URL second crawl attempt failed: {retry_urls[i]}, error: {error_msg}")
+                            error_msg = str(e)
+                            logger.error(f"URL second crawl attempt failed: {retry_urls[i]}, error: {error_msg}")
+            
+            # Consolidate failed URLs
+            crawled_urls = {res["reference"] for res in all_results}
+            failed_urls.extend([url for url in urls_to_process if url not in crawled_urls])
 
             if not all_results:
                 logger.error("All URL crawls failed")

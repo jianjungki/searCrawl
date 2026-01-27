@@ -1,5 +1,17 @@
 version: '3.8'
 
+x-app-base: &app-base
+  build: .
+  volumes:
+    - ./src:/app/src
+  ports:
+    - "8000:3000"
+  env_file:
+    - .env
+  depends_on:
+    redis:
+      condition: service_healthy
+
 services:
   redis:
     image: redis:7-alpine
@@ -28,7 +40,7 @@ services:
       - ./searxng:/etc/searxng:rw
     environment:
       - SEARXNG_BASE_URL=http://localhost:8080/
-      - SEARXNG_SECRET=${SEARXNG_SECRET:-ultrasecretkey}
+      - SEARXNG_SECRET=$${SEARXNG_SECRET:-ultrasecretkey}
     cap_drop:
       - ALL
     cap_add:
@@ -47,21 +59,45 @@ services:
       timeout: 10s
       retries: 3
 
-  app:
-    build: .
-    container_name: searcrawl_app
+  reader:
+    image: ghcr.io/intergalacticalvariable/reader:latest
+    container_name: searcrawl_reader
+    profiles:
+      - reader
+      - full
     volumes:
-      - ./src:/app/src
+      - ./reader_data/local:/app/local-storage
     ports:
-      - "8000:3000"
-    env_file:
-      - .env
+      - "3001:3000"
+    restart: unless-stopped
+
+  app:
+    <<: *app-base
+    container_name: searcrawl_app
+    profiles:
+      - default
+      - searxng
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - SEARXNG_URL=$${SEARXNG_URL:-http://searxng:8080}
+      - READER_ENABLED=false
+
+  app-reader:
+    <<: *app-base
+    container_name: searcrawl_app_reader
+    profiles:
+      - reader
+      - full
     depends_on:
       redis:
         condition: service_healthy
+      reader:
+        condition: service_started
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - SEARXNG_URL=${SEARXNG_URL:-http://searxng:8080}
+      - SEARXNG_URL=$${SEARXNG_URL:-http://searxng:8080}
+      - READER_URL=http://reader:3000
+      - READER_ENABLED=true
 
 volumes:
   redis_data:
